@@ -1,0 +1,151 @@
+//Must be used in Google Apps Script
+
+function RssCalendar() {
+//Get all the "items" from the RSS feed to determine length of arrays 
+  var URL = "http://www.visitchampaigncounty.org/events/rss";
+  var rssXML = UrlFetchApp.fetch(URL).getContentText();
+  var document = XmlService.parse(rssXML);
+  var root = document.getRootElement();
+  var channel = root.getChild('channel');
+  var item = channel.getChild('item');
+  var AllItems = channel.getChildren('item');
+ 
+ //Declare variables from XML items
+  var titlesArray= new Array(AllItems.length);
+  var linksArray= new Array(AllItems.length);
+  var descriptionsArray = new Array(AllItems.length);
+  
+ //Declare variables to use for events
+  var eventDayArray = new Array(AllItems.length);
+  var eventDateStringArray = new Array(AllItems.length);
+  var eventDateArray = new Array(AllItems.length);
+  var startTimeArray = new Array(AllItems.length);
+  var endTimeArray = new Array(AllItems.length);
+  var locationArray = new Array(AllItems.length);
+  var eventDescriptionArray = new Array(AllItems.length);
+
+//Declare variables for logistics of uploading into Calendar
+  var eventExists;
+  var calendarID = '???@group.calendar.google.com'; //*****This will need to be changed to whatever the calendar ID is in whatever google calendar you want to use, same below****
+  var eventsOnDate = new Array(AllItems.length)
+  var eventDescription;
+  var eventTitle; 
+  var eventDate; 
+  var eventStart;
+  var eventEnd;
+  var eventLocation; 
+  var eventLink; 
+  var startHour;
+  var endHour;
+  var startMerid;
+  var endMerid;
+  var startMin;
+  var endMin;
+  
+  for(i = 0; i < AllItems.length; i++) {
+    eventExists = 0;
+    Logger.log("Iteration: " + i);
+    
+    titlesArray[i] = AllItems[i].getChildText('title');
+    linksArray[i] = AllItems[i].getChildText('link');
+    descriptionsArray[i] = AllItems[i].getChildText('description');
+    
+    eventDayArray[i] = descriptionsArray[i].substring(0,descriptionsArray[i].indexOf(","));
+    eventDateStringArray[i] = descriptionsArray[i].substring(descriptionsArray[i].indexOf(", ")+2, descriptionsArray[i].indexOf("<")); 
+        eventDateArray[i] = new Date(eventDateStringArray[i]);
+        Logger.log("Event Date: " + eventDateArray[i]);
+
+//Check if event is All-Day
+    if ( descriptionsArray[i].match("Starts at")) {
+        startTimeArray[i] = descriptionsArray[i].substring(descriptionsArray[i].indexOf("Starts") + 10, descriptionsArray[i].indexOf("</s"));
+      }
+      else {
+        startTimeArray[i] =  descriptionsArray[i].substring(descriptionsArray[i].indexOf(">") +20, descriptionsArray[i].indexOf("m to")+1);
+        endTimeArray[i] = descriptionsArray[i].substring(descriptionsArray[i].indexOf("m to")+5, descriptionsArray[i].indexOf("</s"));
+      }
+    locationArray[i] = descriptionsArray[i].substring(descriptionsArray[i].indexOf("</br>")+5);
+
+//Get event location depending on how the data is organized (is there an event link?)    
+    if(locationArray[i].match("href")) {
+       locationArray[i] = locationArray[i].substring(locationArray[i].indexOf("</br>")+5, locationArray[i].indexOf("</br></br>"));}
+     else {
+     locationArray[i] = locationArray[i].substring(locationArray[i].indexOf("</br>")+5)
+        }
+//Gets start and end hour and minute to be used when creating event 
+  startHour = parseInt(startTimeArray[i].substring(0, startTimeArray[i].indexOf(':')));
+  startMerid  = startTimeArray[i].substring(startTimeArray[i].indexOf(":") + 3);         
+  if(startMerid == "pm"){
+     startHour = startHour + 12;
+   }
+   if(startHour == 12) {
+   startHour = 0;
+         }
+   if(startHour == 24) {
+         startHour = 12;
+      }
+  startMin = parseInt(startTimeArray[i].substring(startTimeArray[i].indexOf(':') + 1, startTimeArray[i].indexOf(':') + 3));
+
+//Assigns end time if no end time is already assigned (defaults to one hour event)
+  if(endTimeArray[i] === undefined) {
+    endHour = startHour + 1;
+    endMin = startMin;
+  }  
+  else{
+  endHour = parseInt(endTimeArray[i].substring(0, endTimeArray[i].indexOf(':')));
+  endMerid  = endTimeArray[i].substring(endTimeArray[i].indexOf(":") + 3);         
+  if(endMerid == "pm"){
+     endHour = endHour + 12;
+  if(endHour == 12) {
+   endHour = 0;
+         }
+  if(endHour == 24) {
+         endHour = 12;
+      }
+      }
+   endMin = parseInt(endTimeArray[i].substring(endTimeArray[i].indexOf(':') + 1, endTimeArray[i].indexOf(':') + 3)); 
+   }
+   
+eventDescription = eventDescriptionArray[i];
+eventTitle = titlesArray[i];
+eventDate = eventDateArray[i];
+eventStart = new Date(eventDateArray[i].setHours(startHour, startMin));
+eventEnd = new Date(eventDateArray[i].setHours(endHour, endMin));
+  if(eventEnd.getHours() < eventStart.getHours()) { eventEnd.setDate(eventEnd.getDate()+1); }
+eventLocation = locationArray[i];
+eventLink = linksArray[i];
+
+
+//Gets all events for date of the event the code is working on
+    eventsOnDate = CalendarApp.getCalendarById('???@group.calendar.google.com').getEventsForDay(eventDateArray[i]);
+    //Logger.log("   There are " + eventsOnDate.length + " events on " + eventDateStringArray[i]);
+    //Logger.log("    Looking for event: " + titlesArray[i]);
+    
+//Cycles through all the events on the Date of the current RSS event. If an event matches, sets eventExist = 1
+    for(j = 0; j < eventsOnDate.length; j++){
+      if(eventsOnDate[j].getDescription().match(linksArray[i]) == linksArray[i]) 
+      { eventExists = 1;
+      // Logger.log("    Match Found!!!: " + eventsOnDate[j].getTitle());
+         }
+      //else {Logger.log("    Match not found :( " + eventsOnDate[j].getTitle() + " is not " + titlesArray[i]); }
+    }
+
+//Posts an event if eventExists = 0 (that is, if that event does not exist already)
+  if (eventExists == 0) {
+   // Logger.log("Iteration " + i + " posted an event");
+        Logger.log("Event: " + eventTitle);
+        Logger.log("    Start: " + eventStart);
+        Logger.log("    End:   "+ eventEnd);
+    if(startTimeArray[i] == "12:00am"){
+     CalendarApp.getCalendarById('???@group.calendar.google.com').createAllDayEvent(eventTitle, eventDate, {location: eventLocation, description: eventLink});
+    //  Logger.log("Event " + i + " created as an all day event.");
+     } else {
+      CalendarApp.getCalendarById('???@group.calendar.google.com').createEvent(eventTitle, eventStart, eventEnd, {location: eventLocation, description: eventLink});
+     // Logger.log("Event" + i + "created with start and end times.");
+     } 
+  }
+ 
+  else if(eventExists == 1){
+   eventExists = 0;
+   }
+  }
+  return null;}
